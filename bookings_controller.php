@@ -21,17 +21,7 @@ if ( ! class_exists( 'OsBookingsController' ) ) :
       
 
     }
-    public function saveroom() {
-         
-      $booking_id = $_REQUEST['Id'];
-      $room_text  = $_REQUEST['text'];
-      $booking = new OsBookingModel($booking_id);
-      
-      $booking->room_text = $room_text;
-      $booking->save();
-      
-    }
-    
+
     public function grouped_bookings_quick_view(){
       if(!isset($this->params['booking_id'])) return false;
 
@@ -149,11 +139,6 @@ if ( ! class_exists( 'OsBookingsController' ) ) :
                               __('Booked On', 'latepoint') ];
 
 
-        $custom_fields_for_customer = OsCustomFieldsHelper::get_custom_fields_arr('customer');
-        foreach($custom_fields_for_customer as $custom_field){
-          $labels_row[] = $custom_field['label'];
-        }
-
         $bookings_data = [];
         $bookings_data[] = $labels_row;
 
@@ -173,13 +158,13 @@ if ( ! class_exists( 'OsBookingsController' ) ) :
                                   $booking->agent->email, 
                                   $booking->nice_status, 
                                   $booking->nice_created_at];
-            foreach($custom_fields_for_customer as $custom_field){
-              $values_row[] = $booking->customer->get_meta_by_key($custom_field['id'], '');
-            }
+            $values_row = apply_filters('latepoint_booking_row_for_csv_export', $values_row, $booking, $this->params);
             $bookings_data[] = $values_row;
           }
 
         }
+
+        $bookings_data = apply_filters('latepoint_bookings_data_for_csv_export', $bookings_data, $this->params);
         OsCSVHelper::array_to_csv($bookings_data);
         return;
       }
@@ -293,7 +278,7 @@ if ( ! class_exists( 'OsBookingsController' ) ) :
         $booking = new OsBookingModel($booking_id);
         if($booking->id && OsAuthHelper::is_customer_logged_in() && ($booking->customer_id == OsAuthHelper::get_logged_in_customer_id())){
           $customer = $booking->customer;
-          $custom_fields_for_customer = OsCustomFieldsHelper::get_custom_fields_arr('customer');
+          $default_fields_for_customer = OsSettingsHelper::get_default_fields_for_customer();
           ?>
           <!DOCTYPE html>
           <html lang="en">
@@ -330,20 +315,16 @@ if ( ! class_exists( 'OsBookingsController' ) ) :
                         <li><?php _e('Agent:', 'latepoint'); ?> <strong><?php echo $booking->agent->full_name; ?></strong></li>
                       <?php } ?>
                       <li><?php _e('Service:', 'latepoint'); ?> <strong><?php echo $booking->service->name; ?></strong></li>
-                      <?php do_action('latepoint_step_verify_appointment_info', $booking); ?>
+                      <?php do_action('latepoint_step_confirmation_appointment_info', $booking); ?>
                     </ul>
                   </div>
                   <div class="confirmation-customer-info">
                     <h5 class="confirmation-section-heading"><?php _e('Customer Info', 'latepoint'); ?></h5>
                     <ul>
-                      <li><?php _e('Name:', 'latepoint'); ?> <strong><?php echo $customer->full_name; ?></strong></li>
-                      <li><?php _e('Phone:', 'latepoint'); ?> <strong><?php echo $customer->formatted_phone; ?></strong></li>
+                      <?php if($default_fields_for_customer['first_name']['active'] || $default_fields_for_customer['last_name']['active']) echo '<li>'.__('Name:', 'latepoint').'<strong>'.$customer->full_name.'</strong></li>'; ?>
+                      <?php if($default_fields_for_customer['phone']['active']) echo '<li>'.__('Phone:', 'latepoint').'<strong>'.$customer->formatted_phone.'</strong></li>'; ?>
                       <li><?php _e('Email:', 'latepoint'); ?> <strong><?php echo $customer->email; ?></strong></li>
-                      <?php if($custom_fields_for_customer){
-                        foreach($custom_fields_for_customer as $custom_field){
-                          echo '<li>'.$custom_field['label'].': <strong>'.$customer->get_meta_by_key($custom_field['id'], __('n/a', 'latepoint')).'</strong></li>';
-                        }
-                      } ?>
+                      <?php do_action('latepoint_step_confirmation_customer_info', $customer, $booking); ?>
                     </ul>
                   </div>
                   <?php if(OsSettingsHelper::is_accepting_payments()){
@@ -429,7 +410,6 @@ if ( ! class_exists( 'OsBookingsController' ) ) :
       $customer_params = $this->params['customer'];
       $this->params['booking']['start_date'] = OsTimeHelper::reformat_date_string($this->params['booking']['start_date'], OsSettingsHelper::get_date_format(), 'Y-m-d');
       $booking_params = $this->params['booking'];
-      $custom_fields_data = isset($customer_params['custom_fields']) ? $customer_params['custom_fields'] : [];
 
       $booking = new OsBookingModel();
       $booking->set_data($booking_params);
@@ -444,8 +424,7 @@ if ( ! class_exists( 'OsBookingsController' ) ) :
         $is_new_customer = true;
       }
       $customer->set_data($customer_params);
-      if($customer->validate_custom_fields($custom_fields_data) && $customer->save()){
-        $customer->save_custom_fields($custom_fields_data);
+      if($customer->save()){
         if($is_new_customer){
           OsNotificationsHelper::process_new_customer_notifications($customer);
           OsActivitiesHelper::create_activity(array('code' => 'customer_create', 'customer_id' => $customer->id));
@@ -486,7 +465,6 @@ if ( ! class_exists( 'OsBookingsController' ) ) :
       $customer_params = $this->params['customer'];
       $this->params['booking']['start_date'] = OsTimeHelper::reformat_date_string($this->params['booking']['start_date'], OsSettingsHelper::get_date_format(), 'Y-m-d');
       $booking_params = $this->params['booking'];
-      $custom_fields_data = isset($customer_params['custom_fields']) ? $customer_params['custom_fields'] : [];
 
       $booking = new OsBookingModel($booking_params['id']);
       $old_booking = clone $booking;
@@ -502,8 +480,7 @@ if ( ! class_exists( 'OsBookingsController' ) ) :
         $is_new_customer = true;
       }
       $customer->set_data($customer_params);
-      if($customer->validate_custom_fields($custom_fields_data) && $customer->save()){
-        $customer->save_custom_fields($custom_fields_data);
+      if($customer->save()){
         if($is_new_customer){
           OsNotificationsHelper::process_new_customer_notifications($customer);
           OsActivitiesHelper::create_activity(array('code' => 'customer_create', 'customer_id' => $customer->id));
@@ -541,7 +518,7 @@ if ( ! class_exists( 'OsBookingsController' ) ) :
       if(isset($this->params['customer_id'])){
         $selected_customer->load_by_id($this->params['customer_id']);
       }
-      $this->vars['custom_fields_for_customer'] = OsCustomFieldsHelper::get_custom_fields_arr('customer');
+      $this->vars['default_fields_for_customer'] = OsSettingsHelper::get_default_fields_for_customer();
       $this->vars['selected_customer'] = $selected_customer;
       $this->format_render(__FUNCTION__);
     }
@@ -595,7 +572,6 @@ if ( ! class_exists( 'OsBookingsController' ) ) :
       $selected_agent = new OsAgentModel($booking->agent_id);
       $selected_customer = new OsCustomerModel($booking->customer_id);
 
-      $this->vars['custom_fields_for_customer'] = OsCustomFieldsHelper::get_custom_fields_arr('customer');
       $service_categories = new OsServiceCategoryModel();
       $service_categories = $service_categories->get_results_as_models();
       $this->vars['service_categories'] = $service_categories;
@@ -608,6 +584,7 @@ if ( ! class_exists( 'OsBookingsController' ) ) :
       $this->vars['selected_agent'] = $selected_agent;
       $this->vars['selected_customer'] = $selected_customer;
       $this->vars['transactions'] = $transactions;
+      $this->vars['default_fields_for_customer'] = OsSettingsHelper::get_default_fields_for_customer();
       $this->format_render(__FUNCTION__);
     }
 
@@ -646,7 +623,6 @@ if ( ! class_exists( 'OsBookingsController' ) ) :
       $booking->status = 'approved';
 
       $selected_customer = new OsCustomerModel($booking->customer_id);
-      $this->vars['custom_fields_for_customer'] = OsCustomFieldsHelper::get_custom_fields_arr('customer');
       $this->vars['selected_customer'] = $selected_customer;
       $service_categories = new OsServiceCategoryModel();
       $service_categories = $service_categories->get_results_as_models();
@@ -658,6 +634,7 @@ if ( ! class_exists( 'OsBookingsController' ) ) :
       
       $this->vars['booking'] = $booking;
       $this->vars['transactions'] = false;
+      $this->vars['default_fields_for_customer'] = OsSettingsHelper::get_default_fields_for_customer();
       $this->format_render(__FUNCTION__);
     }
 
